@@ -1,0 +1,91 @@
+@import "tailwindcss";
+
+:root {
+  --background: #fffdf8;
+  --foreground: #171717;
+}
+
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --font-sans: var(--font-geist-sans);
+  --font-mono: var(--font-geist-mono);
+
+  /* Persian green — primary brand color */
+  --color-persian-50: #ecfdf9;
+  --color-persian-100: #d1faf0;
+  --color-persian-200: #a6f2e1;
+  --color-persian-300: #6fe4ce;
+  --color-persian-400: #3bcfb7;
+  --color-persian-500: #17b39d;
+  --color-persian-600: #0d9488;
+  --color-persian-700: #0c7a70;
+  --color-persian-800: #106259;
+  --color-persian-900: #11504a;
+  --color-persian-950: #052e2b;
+
+  /* Firoozeh (Persian turquoise) — secondary accent */
+  --color-firoozeh-50: #ecfeff;
+  --color-firoozeh-100: #cffbfe;
+  --color-firoozeh-200: #a4f4fc;
+  --color-firoozeh-300: #67e8f5;
+  --color-firoozeh-400: #2dd4e3;
+  --color-firoozeh-500: #14b8ce;
+  --color-firoozeh-600: #0d93a8;
+  --color-firoozeh-700: #0f7688;
+  --color-firoozeh-800: #135f6e;
+  --color-firoozeh-900: #144f5c;
+  --color-firoozeh-950: #06333d;
+
+  /* Saffron gold — warm highlight/CTA accent */
+  --color-saffron-50: #fffbeb;
+  --color-saffron-100: #fef3c7;
+  --color-saffron-200: #fde4a0;
+  --color-saffron-300: #fbcf6e;
+  --color-saffron-400: #f7b93e;
+  --color-saffron-500: #e8a31c;
+  --color-saffron-600: #c6841a;
+  --color-saffron-700: #9e661a;
+  --color-saffron-800: #82531d;
+  --color-saffron-900: #6d451e;
+  --color-saffron-950: #3e250e;
+
+  /* Anar (pomegranate) — warm red accent */
+  --color-anar-50: #fef2f3;
+  --color-anar-100: #fce4e6;
+  --color-anar-200: #f9cacf;
+  --color-anar-300: #f2a0aa;
+  --color-anar-400: #e66b7d;
+  --color-anar-500: #d63a55;
+  --color-anar-600: #b62347;
+  --color-anar-700: #93173d;
+  --color-anar-800: #7a1636;
+  --color-anar-900: #681530;
+  --color-anar-950: #3a0718;
+
+  /* Banafsh (Persian violet) — festive accent */
+  --color-banafsh-50: #f5f3fb;
+  --color-banafsh-100: #ebe5f7;
+  --color-banafsh-200: #d3c5ef;
+  --color-banafsh-300: #b39be0;
+  --color-banafsh-400: #9370cb;
+  --color-banafsh-500: #7952b3;
+  --color-banafsh-600: #603e94;
+  --color-banafsh-700: #4e3278;
+  --color-banafsh-800: #402a63;
+  --color-banafsh-900: #362454;
+  --color-banafsh-950: #1f1430;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --background: #0c1210;
+    --foreground: #ededed;
+  }
+}
+
+body {
+  background: var(--background);
+  color: var(--foreground);
+  font-family: Arial, Helvetica, sans-serif;
+}
