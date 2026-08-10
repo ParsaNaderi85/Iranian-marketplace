@@ -29,6 +29,45 @@ export async function getOrdersForCustomer(
   return (data as OrderWithItems[]) ?? [];
 }
 
+export async function getOrderForCustomer(
+  orderId: string,
+  customerId: string,
+): Promise<OrderWithItems | null> {
+  const supabase = await createClient();
+  const { data } = await supabase
+    .from("orders")
+    .select("*, order_items(*)")
+    .eq("id", orderId)
+    .eq("customer_id", customerId)
+    .maybeSingle();
+
+  return (data as OrderWithItems | null) ?? null;
+}
+
+export async function getOrderForInvoice(
+  orderId: string,
+  userId: string,
+  isAdmin: boolean,
+): Promise<OrderWithItems | null> {
+  const supabase = await createClient();
+  const { data: order } = await supabase
+    .from("orders")
+    .select("*, order_items(*)")
+    .eq("id", orderId)
+    .maybeSingle();
+  if (!order) return null;
+
+  if (isAdmin || order.customer_id === userId) return order as OrderWithItems;
+
+  const { data: vendor } = await supabase
+    .from("vendors")
+    .select("id")
+    .eq("id", order.vendor_id)
+    .eq("owner_id", userId)
+    .maybeSingle();
+  return vendor ? (order as OrderWithItems) : null;
+}
+
 export async function getAllOrders(): Promise<OrderWithItems[]> {
   const supabase = await createClient();
   const { data } = await supabase

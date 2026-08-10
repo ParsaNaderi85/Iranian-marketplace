@@ -4,11 +4,32 @@ import { z } from "zod";
 import { createClient } from "@/lib/supabase/server";
 import { getCurrentUser } from "@/lib/auth/session";
 import { getStripe } from "@/lib/stripe/server";
+import { geocodeAddress } from "@/lib/geocode";
+import { sendOrderPlacedEmails } from "@/lib/email/order-emails";
 import {
   validateCoupon,
   markCouponUsed,
   grantReferralRewardIfEligible,
 } from "@/lib/referral/actions";
+import { validateVendorCoupon } from "@/lib/vendor/coupon-actions";
+
+export async function previewAnyCoupon(
+  code: string,
+  vendorId: string,
+): Promise<{ discountPercent: number } | { error: string }> {
+  if (!code.trim()) return { error: "invalid" };
+
+  const user = await getCurrentUser();
+  if (!user) return { error: "unauthorized" };
+
+  const referral = await validateCoupon(code, user.id);
+  if (referral) return { discountPercent: referral.discountPercent };
+
+  const vendorCoupon = await validateVendorCoupon(code, vendorId);
+  if (vendorCoupon) return { discountPercent: vendorCoupon.discountPercent };
+
+  return { error: "invalidCoupon" };
+}
 
 const checkoutSchema = z.object({
   vendorId: z.string().uuid(),
@@ -29,7 +50,19 @@ const checkoutSchema = z.object({
 });
 
 export type CheckoutInput = z.infer<typeof checkoutSchema>;
-export type CheckoutResult = { redirectUrl: string } | { error: string };
+export type CheckoutResult =
+  | { redirectUrl: string; orderId: string }
+  | { error: string };
+
+export async function getVendorDeliveryFee(vendorId: string): Promise<number> {
+  const supabase = await createClient();
+  const { data } = await supabase
+    .from("vendors")
+    .select("delivery_fee_aed")
+    .eq("id", vendorId)
+    .single();
+  return (data?.delivery_fee_aed as number) ?? 0;
+}
 
 export async function placeOrder(
   input: CheckoutInput,
@@ -73,6 +106,19 @@ export async function placeOrder(
     return { error: "productsUnavailable" };
   }
 
+  // Fast, non-authoritative pre-check for quick user feedback. The real
+  // enforcement is the atomic RPC call below, done at write time, which is
+  // what actually prevents overselling under concurrent checkouts.
+  for (const item of items) {
+    const product = products.find((p) => p.id === item.productId)!;
+    if (
+      product.stock_quantity != null &&
+      product.stock_quantity < item.quantity
+    ) {
+      return { error: "insufficientStock" };
+    }
+  }
+
   const orderItems = items.map((item) => {
     const product = products.find((p) => p.id === item.productId)!;
     return {
@@ -89,13 +135,23 @@ export async function placeOrder(
   );
   const commissionRate = vendor.commission_rate as number;
   const commissionAmount = Math.round(subtotal * (commissionRate / 100) * 100) / 100;
+  const deliveryFee = (vendor.delivery_fee_aed as number) ?? 0;
 
-  const coupon = couponCode
+  const referralCoupon = couponCode
     ? await validateCoupon(couponCode, user.id)
     : null;
-  const total = coupon
-    ? Math.round(subtotal * (1 - coupon.discountPercent / 100) * 100) / 100
+  const vendorCoupon =
+    couponCode && !referralCoupon
+      ? await validateVendorCoupon(couponCode, vendorId)
+      : null;
+  const discountPercent =
+    referralCoupon?.discountPercent ?? vendorCoupon?.discountPercent ?? null;
+  const discountedSubtotal = discountPercent
+    ? Math.round(subtotal * (1 - discountPercent / 100) * 100) / 100
     : subtotal;
+  const total = Math.round((discountedSubtotal + deliveryFee) * 100) / 100;
+
+  const deliveryGeo = await geocodeAddress(`${addressLine1}, ${area}, Dubai, UAE`);
 
   const { data: order, error: orderError } = await supabase
     .from("orders")
@@ -105,9 +161,12 @@ export async function placeOrder(
       payment_method: paymentMethod,
       subtotal_aed: subtotal,
       commission_amount_aed: commissionAmount,
+      delivery_fee_aed: deliveryFee,
       total_aed: total,
       delivery_line1: `${addressLabel}: ${addressLine1}`,
       delivery_area: area,
+      delivery_lat: deliveryGeo?.lat ?? null,
+      delivery_lng: deliveryGeo?.lng ?? null,
     })
     .select()
     .single();
@@ -120,41 +179,60 @@ export async function placeOrder(
 
   if (itemsError) return { error: "orderFailed" };
 
-  if (coupon) {
-    await markCouponUsed(coupon.couponId, order.id);
+  const { error: stockError } = await supabase.rpc("decrement_stock_for_order", {
+    items: items.map((i) => ({ product_id: i.productId, quantity: i.quantity })),
+  });
+  if (stockError) {
+    // Real stock ran out between the pre-check and this atomic write —
+    // unwind the order we just created rather than leave a phantom order.
+    await supabase.from("order_items").delete().eq("order_id", order.id);
+    await supabase.from("orders").delete().eq("id", order.id);
+    return { error: "insufficientStock" };
+  }
+
+  if (referralCoupon) {
+    await markCouponUsed(referralCoupon.couponId, order.id);
   }
   await grantReferralRewardIfEligible(user.id);
+  await sendOrderPlacedEmails(order.id);
 
   const siteUrl = process.env.NEXT_PUBLIC_SITE_URL ?? "http://localhost:3000";
 
   if (paymentMethod === "cod") {
-    return { redirectUrl: `/${locale}/checkout/success?order=${order.id}` };
+    return {
+      redirectUrl: `/${locale}/checkout/success?order=${order.id}`,
+      orderId: order.id,
+    };
   }
 
+  // Discount (if any) is applied per line item rather than via a Stripe
+  // session-level coupon, since the delivery fee line below must stay
+  // undiscounted to match the total we already calculated above.
+  const discountMultiplier = discountPercent ? 1 - discountPercent / 100 : 1;
   const lineItems = orderItems.map((item) => ({
     quantity: item.quantity,
     price_data: {
       currency: "aed",
-      unit_amount: Math.round(item.price_snapshot_aed * 100),
+      unit_amount: Math.round(item.price_snapshot_aed * discountMultiplier * 100),
       product_data: { name: item.name_snapshot },
     },
   }));
 
-  let stripeDiscounts: { coupon: string }[] | undefined;
-  if (coupon) {
-    const stripeCoupon = await getStripe().coupons.create({
-      percent_off: coupon.discountPercent,
-      duration: "once",
-      name: `Referral discount (${coupon.discountPercent}%)`,
+  if (deliveryFee > 0) {
+    lineItems.push({
+      quantity: 1,
+      price_data: {
+        currency: "aed",
+        unit_amount: Math.round(deliveryFee * 100),
+        product_data: { name: "Delivery fee" },
+      },
     });
-    stripeDiscounts = [{ coupon: stripeCoupon.id }];
   }
 
   const session = await getStripe().checkout.sessions.create({
     mode: "payment",
     customer_email: user.email ?? undefined,
     line_items: lineItems,
-    discounts: stripeDiscounts,
     success_url: `${siteUrl}/${locale}/checkout/success?order=${order.id}`,
     cancel_url: `${siteUrl}/${locale}/checkout`,
     metadata: { order_id: order.id },
@@ -166,5 +244,5 @@ export async function placeOrder(
     .eq("id", order.id);
 
   if (!session.url) return { error: "orderFailed" };
-  return { redirectUrl: session.url };
+  return { redirectUrl: session.url, orderId: order.id };
 }

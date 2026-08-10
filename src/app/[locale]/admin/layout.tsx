@@ -25,7 +25,11 @@ export default async function AdminLayout({
       </h1>
       <nav className="mb-6 flex gap-4 text-sm">
         <Link href="/admin/vendors">{t("vendors")}</Link>
+        <Link href="/admin/applications">{t("applications")}</Link>
         <Link href="/admin/orders">{t("orders")}</Link>
+        <Link href="/admin/analytics">{t("analytics")}</Link>
+        <Link href="/admin/campaigns">{t("campaigns")}</Link>
+        <Link href="/admin/payouts">{t("payouts")}</Link>
       </nav>
       {children}
     </div>

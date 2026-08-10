@@ -24,6 +24,7 @@ create table profiles (
   preferred_locale text not null default 'en',
   referral_code text unique,
   referred_by uuid references profiles (id),
+  loyalty_points integer not null default 0,
   created_at timestamptz not null default now()
 );
 
@@ -35,8 +36,11 @@ create table vendors (
   description text,
   logo_url text,
   address text,
+  latitude double precision,
+  longitude double precision,
   status vendor_status not null default 'pending',
   commission_rate numeric(5, 2) not null default 15.00,
+  delivery_fee_aed numeric(10, 2) not null default 0,
   delivers_self boolean not null default true,
   translations jsonb,
   created_at timestamptz not null default now()
@@ -45,7 +49,8 @@ create table vendors (
 create table categories (
   id uuid primary key default gen_random_uuid(),
   name text not null,
-  vendor_type vendor_type not null
+  vendor_type vendor_type not null,
+  vendor_id uuid references vendors (id) on delete cascade
 );
 
 create table products (
@@ -55,8 +60,10 @@ create table products (
   name text not null,
   description text,
   price_aed numeric(10, 2) not null check (price_aed >= 0),
+  sale_price_aed numeric(10, 2) check (sale_price_aed >= 0),
   image_url text,
   is_available boolean not null default true,
+  is_best_seller boolean not null default false,
   created_at timestamptz not null default now()
 );
 
@@ -78,10 +85,14 @@ create table orders (
   payment_status payment_status not null default 'unpaid',
   subtotal_aed numeric(10, 2) not null,
   commission_amount_aed numeric(10, 2) not null,
+  delivery_fee_aed numeric(10, 2) not null default 0,
   total_aed numeric(10, 2) not null,
   delivery_line1 text not null,
   delivery_area text not null,
+  delivery_lat double precision,
+  delivery_lng double precision,
   stripe_checkout_session_id text,
+  paid_out boolean not null default false,
   created_at timestamptz not null default now()
 );
 
@@ -116,6 +127,112 @@ create table coupons (
   used_on_order_id uuid references orders (id),
   created_at timestamptz not null default now()
 );
+
+create table vendor_applications (
+  id uuid primary key default gen_random_uuid(),
+  business_name text not null,
+  business_type text not null check (business_type in ('supermarket', 'restaurant', 'bakery', 'cafe', 'catering')),
+  contact_name text not null,
+  contact_email text not null,
+  contact_phone text,
+  area text,
+  message text,
+  status text not null default 'new' check (status in ('new', 'contacted', 'approved', 'rejected')),
+  created_at timestamptz not null default now()
+);
+
+alter table vendor_applications enable row level security;
+
+create policy "Anyone can submit a vendor application" on vendor_applications
+  for insert with check (true);
+
+create policy "Admins manage vendor applications" on vendor_applications
+  for all using (public.current_role() = 'admin')
+  with check (public.current_role() = 'admin');
+
+create table campaigns (
+  id uuid primary key default gen_random_uuid(),
+  title text not null,
+  message text not null,
+  discount_percent numeric(5, 2) check (discount_percent is null or (discount_percent > 0 and discount_percent <= 100)),
+  starts_at timestamptz not null,
+  ends_at timestamptz not null,
+  active boolean not null default true,
+  created_at timestamptz not null default now()
+);
+
+alter table campaigns enable row level security;
+
+create policy "Anyone can read campaigns" on campaigns
+  for select using (true);
+
+create policy "Admins manage campaigns" on campaigns
+  for all using (public.current_role() = 'admin')
+  with check (public.current_role() = 'admin');
+
+create table vendor_payouts (
+  id uuid primary key default gen_random_uuid(),
+  vendor_id uuid not null references vendors (id) on delete cascade,
+  amount_aed numeric(10, 2) not null check (amount_aed >= 0),
+  order_count integer not null default 0,
+  note text,
+  created_at timestamptz not null default now()
+);
+
+alter table vendor_payouts enable row level security;
+
+create policy "Vendors can read their own payout history" on vendor_payouts
+  for select using (exists (select 1 from vendors where vendors.id = vendor_payouts.vendor_id and vendors.owner_id = auth.uid()));
+
+create policy "Admins manage payouts" on vendor_payouts
+  for all using (public.current_role() = 'admin')
+  with check (public.current_role() = 'admin');
+
+create table group_orders (
+  id uuid primary key default gen_random_uuid(),
+  organizer_id uuid not null references profiles (id) on delete cascade,
+  vendor_id uuid not null references vendors (id) on delete cascade,
+  status text not null default 'open' check (status in ('open', 'checked_out', 'cancelled')),
+  order_id uuid references orders (id),
+  created_at timestamptz not null default now()
+);
+
+alter table group_orders enable row level security;
+
+create policy "Anyone with the link can view a group order" on group_orders
+  for select using (true);
+
+create policy "Organizer manages their group order" on group_orders
+  for all using (organizer_id = auth.uid())
+  with check (organizer_id = auth.uid());
+
+create table group_order_items (
+  id uuid primary key default gen_random_uuid(),
+  group_order_id uuid not null references group_orders (id) on delete cascade,
+  contributor_id uuid not null references profiles (id) on delete cascade,
+  contributor_name text not null,
+  product_id uuid not null references products (id) on delete cascade,
+  quantity integer not null check (quantity > 0),
+  created_at timestamptz not null default now()
+);
+
+alter table group_order_items enable row level security;
+
+create policy "Anyone with the link can view group order items" on group_order_items
+  for select using (true);
+
+create policy "Contributors add their own items" on group_order_items
+  for insert with check (contributor_id = auth.uid());
+
+create policy "Contributors remove their own items, organizer removes any" on group_order_items
+  for delete using (
+    contributor_id = auth.uid()
+    or exists (
+      select 1 from group_orders
+      where group_orders.id = group_order_items.group_order_id
+      and group_orders.organizer_id = auth.uid()
+    )
+  );
 
 create index idx_vendors_owner on vendors (owner_id);
 create index idx_reviews_vendor on reviews (vendor_id);
@@ -161,6 +278,35 @@ as $$
 $$;
 
 -- ---------------------------------------------------------------------------
+-- Helper: atomically check-and-decrement stock for every line item in an
+-- order. Runs inside one implicit transaction per call, so a short item
+-- rolls back every decrement made earlier in the same call.
+-- ---------------------------------------------------------------------------
+create function public.decrement_stock_for_order(items jsonb)
+returns void
+language plpgsql
+security definer set search_path = public
+as $$
+declare
+  item jsonb;
+  updated_rows integer;
+begin
+  for item in select * from jsonb_array_elements(items)
+  loop
+    update products
+    set stock_quantity = stock_quantity - (item->>'quantity')::integer
+    where id = (item->>'product_id')::uuid
+      and (stock_quantity is null or stock_quantity >= (item->>'quantity')::integer);
+
+    get diagnostics updated_rows = row_count;
+    if updated_rows = 0 then
+      raise exception 'insufficient_stock' using errcode = 'P0001';
+    end if;
+  end loop;
+end;
+$$;
+
+-- ---------------------------------------------------------------------------
 -- Row Level Security
 -- ---------------------------------------------------------------------------
 alter table profiles enable row level security;
@@ -199,6 +345,18 @@ create policy "categories_select_all" on categories
 create policy "categories_admin_write" on categories
   for all using (public.current_role() = 'admin')
   with check (public.current_role() = 'admin');
+
+create policy "categories_vendor_insert" on categories
+  for insert with check (
+    vendor_id is not null
+    and exists (select 1 from vendors where vendors.id = categories.vendor_id and vendors.owner_id = auth.uid())
+  );
+
+create policy "categories_vendor_delete" on categories
+  for delete using (
+    vendor_id is not null
+    and exists (select 1 from vendors where vendors.id = categories.vendor_id and vendors.owner_id = auth.uid())
+  );
 
 -- products: public can see available products from approved vendors;
 -- vendor owners manage their own; admins manage all

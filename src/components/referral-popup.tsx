@@ -4,21 +4,20 @@ import { useEffect, useState } from "react";
 import { useTranslations } from "next-intl";
 import { Link } from "@/i18n/navigation";
 
-const STORAGE_KEY = "iranian-marketplace-referral-popup-seen";
-
 export function ReferralPopup() {
   const t = useTranslations("refer");
   const [open, setOpen] = useState(false);
 
   useEffect(() => {
-    if (!window.localStorage.getItem(STORAGE_KEY)) {
-      const timer = setTimeout(() => setOpen(true), 1500);
-      return () => clearTimeout(timer);
-    }
+    // First-time visitors see the onboarding flow first; give it room to
+    // finish before this popup appears on top of it.
+    const isFirstVisit =
+      typeof window !== "undefined" && !window.localStorage.getItem("im_onboarded");
+    const timer = setTimeout(() => setOpen(true), isFirstVisit ? 10000 : 1500);
+    return () => clearTimeout(timer);
   }, []);
 
   function dismiss() {
-    window.localStorage.setItem(STORAGE_KEY, "1");
     setOpen(false);
   }
 

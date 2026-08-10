@@ -4,6 +4,7 @@ import { getCurrentProfile } from "@/lib/auth/session";
 import { getVendorByOwnerId } from "@/lib/data/vendors";
 import { getAllProductsForVendor, getCategoriesForType } from "@/lib/data/products";
 import { AddProductForm } from "@/components/vendor/add-product-form";
+import { NewCategoryForm } from "@/components/vendor/new-category-form";
 import { ProductRow } from "@/components/vendor/product-row";
 
 export default async function VendorProductsPage({
@@ -18,7 +19,7 @@ export default async function VendorProductsPage({
 
   const [products, categories, t] = await Promise.all([
     getAllProductsForVendor(vendor!.id),
-    getCategoriesForType(vendor!.type),
+    getCategoriesForType(vendor!.type, vendor!.id),
     getTranslations("vendorDashboard"),
   ]);
 
@@ -28,6 +29,7 @@ export default async function VendorProductsPage({
         {t("products")}
       </h1>
 
+      <NewCategoryForm locale={locale} />
       <AddProductForm locale={locale} categories={categories} />
 
       <div className="rounded-lg border border-zinc-200 bg-white p-4 dark:border-zinc-800 dark:bg-zinc-900">

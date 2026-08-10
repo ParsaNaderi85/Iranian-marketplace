@@ -1,10 +1,32 @@
+import type { Metadata } from "next";
 import { getTranslations, getLocale } from "next-intl/server";
-import { getApprovedVendors, getVendorAreas } from "@/lib/data/vendors";
+import {
+  getApprovedVendors,
+  getVendorAreas,
+  getTopRatedVendors,
+} from "@/lib/data/vendors";
 import { getRatingSummaries } from "@/lib/data/reviews";
+import { getOnSaleProducts } from "@/lib/data/products";
 import { VendorCard } from "@/components/vendor-card";
+import { OnSaleProductCard } from "@/components/on-sale-product-card";
 import { CategoryIcon } from "@/components/category-icon";
 import { VENDOR_TYPE_SLUGS, type VendorType } from "@/lib/types";
 import { VENDOR_TYPE_COLORS } from "@/lib/vendor-colors";
+
+export async function generateVendorListingMetadata(
+  type: VendorType,
+  locale: string,
+): Promise<Metadata> {
+  const [t, tv] = await Promise.all([
+    getTranslations({ locale, namespace: "nav" }),
+    getTranslations({ locale, namespace: "vendorTypes" }),
+  ]);
+  const slug = VENDOR_TYPE_SLUGS[type];
+  return {
+    title: t(slug as "supermarkets"),
+    description: `Browse Iranian ${tv(type).toLowerCase()} businesses in Dubai on Iranian Marketplace.`,
+  };
+}
 
 export async function VendorListing({
   type,
@@ -15,19 +37,22 @@ export async function VendorListing({
 }) {
   const q = searchParams?.q?.trim() || undefined;
   const area = searchParams?.area || undefined;
+  const hasFilters = Boolean(q || area);
 
-  const [t, tf, locale, vendors, areas] = await Promise.all([
-    getTranslations(),
-    getTranslations("filters"),
-    getLocale(),
-    getApprovedVendors(type, { q, area }),
-    getVendorAreas(type),
-  ]);
+  const [t, tf, locale, vendors, areas, recommended, onSale] =
+    await Promise.all([
+      getTranslations(),
+      getTranslations("filters"),
+      getLocale(),
+      getApprovedVendors(type, { q, area }),
+      getVendorAreas(type),
+      hasFilters ? Promise.resolve([]) : getTopRatedVendors(4, type),
+      hasFilters ? Promise.resolve([]) : getOnSaleProducts(4, type),
+    ]);
   const ratings = await getRatingSummaries(vendors.map((v) => v.id));
   const colors = VENDOR_TYPE_COLORS[type];
   const slug = VENDOR_TYPE_SLUGS[type];
   const basePath = `/${locale}/${slug}`;
-  const hasFilters = Boolean(q || area);
 
   return (
     <div>
@@ -79,6 +104,32 @@ export async function VendorListing({
             </a>
           )}
         </form>
+
+        {recommended.length > 0 && (
+          <section className="mb-10">
+            <h2 className="mb-4 text-lg font-semibold text-zinc-900 dark:text-zinc-50">
+              {t("home.recommendedTitle")}
+            </h2>
+            <div className="grid grid-cols-2 gap-4 sm:grid-cols-3 md:grid-cols-4">
+              {recommended.map((vendor) => (
+                <VendorCard key={vendor.id} vendor={vendor} rating={vendor.rating} />
+              ))}
+            </div>
+          </section>
+        )}
+
+        {onSale.length > 0 && (
+          <section className="mb-10">
+            <h2 className="mb-4 text-lg font-semibold text-zinc-900 dark:text-zinc-50">
+              {t("home.onSaleTitle")}
+            </h2>
+            <div className="grid grid-cols-2 gap-4 sm:grid-cols-3 md:grid-cols-4">
+              {onSale.map((product) => (
+                <OnSaleProductCard key={product.id} product={product} />
+              ))}
+            </div>
+          </section>
+        )}
 
         {vendors.length === 0 ? (
           <p className="text-zinc-500 dark:text-zinc-400">

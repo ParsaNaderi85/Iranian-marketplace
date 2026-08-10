@@ -34,7 +34,11 @@ export async function Navbar() {
             <Link href="/vendor">{t("vendorDashboard")}</Link>
           )}
           {profile?.role === "customer" && (
-            <Link href="/orders">{t("myOrders")}</Link>
+            <>
+              <Link href="/orders">{t("myOrders")}</Link>
+              <Link href="/favorites">{t("favorites")}</Link>
+              <Link href="/loyalty">{t("loyalty")}</Link>
+            </>
           )}
         </nav>
 

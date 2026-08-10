@@ -6,6 +6,9 @@ import { createClient, createServiceRoleClient } from "@/lib/supabase/server";
 import { getCurrentProfile, getCurrentUser } from "@/lib/auth/session";
 import { getVendorByOwnerId } from "@/lib/data/vendors";
 import { VENDOR_TYPES, type OrderStatus, type VendorType } from "@/lib/types";
+import { sendOrderStatusEmail } from "@/lib/email/order-emails";
+import { grantReviewIncentive } from "@/lib/reviews/incentive-actions";
+import { awardLoyaltyPoints } from "@/lib/loyalty/actions";
 
 export type ActionState = { error?: string } | undefined;
 
@@ -115,6 +118,32 @@ export async function addProduct(
   return undefined;
 }
 
+export async function updateDeliveryFee(
+  _prevState: ActionState,
+  formData: FormData,
+): Promise<ActionState> {
+  const user = await getCurrentUser();
+  if (!user) return { error: "unauthorized" };
+
+  const vendor = await getVendorByOwnerId(user.id);
+  if (!vendor) return { error: "noVendor" };
+
+  const parsed = z.coerce.number().min(0).safeParse(formData.get("deliveryFeeAed"));
+  if (!parsed.success) return { error: "invalid" };
+
+  const locale = String(formData.get("locale") ?? "en");
+  const supabase = await createClient();
+  const { error } = await supabase
+    .from("vendors")
+    .update({ delivery_fee_aed: parsed.data })
+    .eq("id", vendor.id);
+
+  if (error) return { error: "invalid" };
+
+  revalidatePath(`/${locale}/vendor`);
+  return undefined;
+}
+
 async function uploadProductImage(
   vendorId: string,
   file: File,
@@ -130,6 +159,80 @@ async function uploadProductImage(
 
   const { data } = service.storage.from("product-images").getPublicUrl(path);
   return data.publicUrl;
+}
+
+async function uploadVendorImage(
+  vendorId: string,
+  kind: "logo" | "banner",
+  file: File,
+): Promise<string | null> {
+  const service = await createServiceRoleClient();
+  const ext = file.name.split(".").pop() || "jpg";
+  const path = `${vendorId}/${kind}.${ext}`;
+
+  const { error } = await service.storage
+    .from("vendor-logos")
+    .upload(path, file, { contentType: file.type, upsert: true });
+  if (error) return null;
+
+  const { data } = service.storage.from("vendor-logos").getPublicUrl(path);
+  return `${data.publicUrl}?v=${Date.now()}`;
+}
+
+export async function updateVendorImages(
+  _prevState: ActionState,
+  formData: FormData,
+): Promise<ActionState> {
+  const user = await getCurrentUser();
+  if (!user) return { error: "unauthorized" };
+
+  const vendor = await getVendorByOwnerId(user.id);
+  if (!vendor) return { error: "noVendor" };
+
+  const locale = String(formData.get("locale") ?? "en");
+  const updates: Record<string, string> = {};
+
+  const logo = formData.get("logo");
+  if (logo instanceof File && logo.size > 0) {
+    if (logo.size > 5 * 1024 * 1024) return { error: "imageTooLarge" };
+    const uploaded = await uploadVendorImage(vendor.id, "logo", logo);
+    if (!uploaded) return { error: "imageUploadFailed" };
+    updates.logo_url = uploaded;
+  }
+
+  const banner = formData.get("banner");
+  if (banner instanceof File && banner.size > 0) {
+    if (banner.size > 5 * 1024 * 1024) return { error: "imageTooLarge" };
+    const uploaded = await uploadVendorImage(vendor.id, "banner", banner);
+    if (!uploaded) return { error: "imageUploadFailed" };
+    updates.banner_url = uploaded;
+  }
+
+  if (Object.keys(updates).length === 0) return undefined;
+
+  const supabase = await createClient();
+  const { error } = await supabase.from("vendors").update(updates).eq("id", vendor.id);
+  if (error) return { error: "invalid" };
+
+  revalidatePath(`/${locale}/vendor/settings`);
+  revalidatePath(`/${locale}/vendors/${vendor.id}`);
+  return undefined;
+}
+
+export async function updateProductInventory(
+  productId: string,
+  costPriceAed: number | null,
+  stockQuantity: number | null,
+  locale: string,
+) {
+  const user = await getCurrentUser();
+  if (!user) return;
+  const supabase = await createClient();
+  await supabase
+    .from("products")
+    .update({ cost_price_aed: costPriceAed, stock_quantity: stockQuantity })
+    .eq("id", productId);
+  revalidatePath(`/${locale}/vendor/products`);
 }
 
 export async function toggleProductAvailability(
@@ -170,7 +273,7 @@ export async function advanceOrderStatus(orderId: string, locale: string) {
   const supabase = await createClient();
   const { data: order } = await supabase
     .from("orders")
-    .select("status")
+    .select("status, customer_id, total_aed")
     .eq("id", orderId)
     .single();
   if (!order) return;
@@ -181,6 +284,13 @@ export async function advanceOrderStatus(orderId: string, locale: string) {
   await supabase.from("orders").update({ status: next }).eq("id", orderId);
   revalidatePath(`/${locale}/vendor/orders`);
   revalidatePath(`/${locale}/orders`);
+
+  let reviewIncentiveCode: string | null = null;
+  if (next === "delivered") {
+    reviewIncentiveCode = await grantReviewIncentive(order.customer_id);
+    await awardLoyaltyPoints(order.customer_id, order.total_aed);
+  }
+  await sendOrderStatusEmail(orderId, next, reviewIncentiveCode);
 }
 
 export async function cancelOrder(orderId: string, locale: string) {
@@ -193,4 +303,5 @@ export async function cancelOrder(orderId: string, locale: string) {
     .eq("id", orderId);
   revalidatePath(`/${locale}/vendor/orders`);
   revalidatePath(`/${locale}/orders`);
+  await sendOrderStatusEmail(orderId, "cancelled");
 }

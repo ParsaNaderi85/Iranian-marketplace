@@ -8,8 +8,11 @@ import { routing, localeDirections, type Locale } from "@/i18n/routing";
 import { Navbar } from "@/components/navbar";
 import { Footer } from "@/components/footer";
 import { PersianDivider } from "@/components/persian-divider";
-import { ReferralPopup } from "@/components/referral-popup";
 import { CartProvider } from "@/lib/cart/cart-context";
+import { AssistantWidget } from "@/components/assistant-widget";
+import { OnboardingFlow } from "@/components/onboarding-flow";
+import { CampaignBanner } from "@/components/campaign-banner";
+import { getActiveCampaign } from "@/lib/data/campaigns";
 import "../globals.css";
 
 const geistSans = Geist({
@@ -51,7 +54,10 @@ export default async function LocaleLayout({
     notFound();
   }
 
-  const messages = await getMessages();
+  const [messages, activeCampaign] = await Promise.all([
+    getMessages(),
+    getActiveCampaign(),
+  ]);
   const dir = localeDirections[locale as Locale];
 
   return (
@@ -63,11 +69,13 @@ export default async function LocaleLayout({
       <body className="min-h-full flex flex-col bg-zinc-50 dark:bg-black">
         <NextIntlClientProvider messages={messages}>
           <CartProvider>
+            {activeCampaign && <CampaignBanner campaign={activeCampaign} />}
             <PersianDivider />
             <Navbar />
             <main className="flex-1">{children}</main>
             <Footer />
-            <ReferralPopup />
+            <AssistantWidget />
+            <OnboardingFlow />
           </CartProvider>
         </NextIntlClientProvider>
       </body>

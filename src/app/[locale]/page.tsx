@@ -1,20 +1,35 @@
 import { getTranslations } from "next-intl/server";
 import { Link } from "@/i18n/navigation";
-import { getFeaturedVendors } from "@/lib/data/vendors";
+import { getFeaturedVendors, getTopRatedVendors } from "@/lib/data/vendors";
 import { getRatingSummaries } from "@/lib/data/reviews";
+import { getOnSaleProducts } from "@/lib/data/products";
+import { getPersonalizedRecommendations } from "@/lib/data/recommendations";
+import { getCurrentProfile } from "@/lib/auth/session";
 import { VendorCard } from "@/components/vendor-card";
+import { OnSaleProductCard } from "@/components/on-sale-product-card";
+import { ProductCard } from "@/components/product-card";
 import { CategoryTile } from "@/components/category-tile";
 import { PersianDivider } from "@/components/persian-divider";
+import { ReferralPopup } from "@/components/referral-popup";
 import { VENDOR_TYPES } from "@/lib/types";
 
 export default async function HomePage() {
   const t = await getTranslations("home");
   const tv = await getTranslations("vendorTypes");
-  const featured = await getFeaturedVendors();
+  const profile = await getCurrentProfile();
+  const [featured, recommended, onSale, personalized] = await Promise.all([
+    getFeaturedVendors(),
+    getTopRatedVendors(4),
+    getOnSaleProducts(4),
+    profile?.role === "customer"
+      ? getPersonalizedRecommendations(profile.id, 4)
+      : Promise.resolve([]),
+  ]);
   const ratings = await getRatingSummaries(featured.map((v) => v.id));
 
   return (
     <div>
+      <ReferralPopup />
       {/* Hero */}
       <section className="relative overflow-hidden bg-gradient-to-br from-persian-900 via-firoozeh-800 to-saffron-700 px-4 py-20 text-center text-white sm:py-28">
         <div
@@ -44,7 +59,7 @@ export default async function HomePage() {
               {t("heroCtaBrowse")}
             </Link>
             <Link
-              href="/signup"
+              href="/become-a-vendor"
               className="rounded-md border border-white/70 px-5 py-2.5 font-medium text-white hover:bg-white/10"
             >
               {t("heroCtaVendor")}
@@ -111,6 +126,59 @@ export default async function HomePage() {
         </div>
       </section>
 
+      {/* Recommended for you */}
+      {recommended.length > 0 && (
+        <section className="bg-white py-14 dark:bg-zinc-950">
+          <div className="mx-auto max-w-6xl px-4">
+            <h2 className="mb-6 text-2xl font-semibold text-zinc-900 dark:text-zinc-50">
+              {t("recommendedTitle")}
+            </h2>
+            <div className="grid grid-cols-2 gap-4 sm:grid-cols-3 md:grid-cols-4">
+              {recommended.map((vendor) => (
+                <VendorCard key={vendor.id} vendor={vendor} rating={vendor.rating} />
+              ))}
+            </div>
+          </div>
+        </section>
+      )}
+
+      {/* On sale */}
+      {onSale.length > 0 && (
+        <section className="bg-anar-50 py-14 dark:bg-anar-950/30">
+          <div className="mx-auto max-w-6xl px-4">
+            <h2 className="mb-6 text-2xl font-semibold text-zinc-900 dark:text-zinc-50">
+              {t("onSaleTitle")}
+            </h2>
+            <div className="grid grid-cols-2 gap-4 sm:grid-cols-3 md:grid-cols-4">
+              {onSale.map((product) => (
+                <OnSaleProductCard key={product.id} product={product} />
+              ))}
+            </div>
+          </div>
+        </section>
+      )}
+
+      {/* Personalized recommendations */}
+      {personalized.length > 0 && (
+        <section className="bg-firoozeh-50 py-14 dark:bg-firoozeh-950/40">
+          <div className="mx-auto max-w-6xl px-4">
+            <h2 className="mb-6 text-2xl font-semibold text-zinc-900 dark:text-zinc-50">
+              {t("basedOnYourOrdersTitle")}
+            </h2>
+            <div className="grid grid-cols-2 gap-4 sm:grid-cols-3 md:grid-cols-4">
+              {personalized.map((product) => (
+                <ProductCard
+                  key={product.id}
+                  product={product}
+                  vendorId={product.vendorId}
+                  vendorName={product.vendorName}
+                />
+              ))}
+            </div>
+          </div>
+        </section>
+      )}
+
       {/* Featured vendors */}
       {featured.length > 0 && (
         <section className="bg-white py-14 dark:bg-zinc-950">
@@ -136,7 +204,7 @@ export default async function HomePage() {
           {t("vendorCtaBody")}
         </p>
         <Link
-          href="/signup"
+          href="/become-a-vendor"
           className="inline-block rounded-md bg-saffron-400 px-5 py-2.5 font-medium text-zinc-900 hover:bg-saffron-300"
         >
           {t("vendorCtaButton")}

@@ -1,5 +1,5 @@
 import { getTranslations } from "next-intl/server";
-import { redirect } from "@/i18n/navigation";
+import { redirect, Link } from "@/i18n/navigation";
 import { getCurrentUser } from "@/lib/auth/session";
 import { getOrdersForCustomer } from "@/lib/data/orders";
 import { OrderCard } from "@/components/order-card";
@@ -28,7 +28,9 @@ export default async function MyOrdersPage({
       ) : (
         <div className="flex flex-col gap-4">
           {orders.map((order) => (
-            <OrderCard key={order.id} order={order} />
+            <Link key={order.id} href={`/orders/${order.id}`} className="block">
+              <OrderCard order={order} />
+            </Link>
           ))}
         </div>
       )}

@@ -58,6 +58,15 @@ export async function OrderCard({
         ))}
       </ul>
 
+      {order.delivery_fee_aed > 0 && (
+        <div className="flex items-center justify-between border-t border-zinc-100 pt-3 text-sm text-zinc-500 dark:border-zinc-800 dark:text-zinc-400">
+          <span>{t("deliveryFeeLabel")}</span>
+          <span>
+            {order.delivery_fee_aed.toFixed(2)} {tc("currency")}
+          </span>
+        </div>
+      )}
+
       <div className="flex items-center justify-between border-t border-zinc-100 pt-3 text-sm dark:border-zinc-800">
         <span className="text-zinc-500 dark:text-zinc-400">
           {t(`paymentMethod.${order.payment_method}` as "paymentMethod.online")}

@@ -1,10 +1,13 @@
 "use client";
 
-import { use, useState } from "react";
+import { use, useEffect, useState } from "react";
 import { useTranslations } from "next-intl";
 import { useCart } from "@/lib/cart/cart-context";
-import { placeOrder } from "@/lib/checkout/actions";
-import { previewCoupon } from "@/lib/referral/actions";
+import {
+  placeOrder,
+  getVendorDeliveryFee,
+  previewAnyCoupon,
+} from "@/lib/checkout/actions";
 
 export default function CheckoutPage({
   params,
@@ -28,6 +31,12 @@ export default function CheckoutPage({
   const [couponDiscount, setCouponDiscount] = useState<number | null>(null);
   const [couponError, setCouponError] = useState<string | null>(null);
   const [checkingCoupon, setCheckingCoupon] = useState(false);
+  const [deliveryFee, setDeliveryFee] = useState(0);
+
+  useEffect(() => {
+    if (!cart) return;
+    getVendorDeliveryFee(cart.vendorId).then(setDeliveryFee);
+  }, [cart?.vendorId]);
 
   if (!cart || cart.items.length === 0) {
     return (
@@ -40,7 +49,7 @@ export default function CheckoutPage({
   async function handleApplyCoupon() {
     setCheckingCoupon(true);
     setCouponError(null);
-    const result = await previewCoupon(couponCode);
+    const result = await previewAnyCoupon(couponCode, cart!.vendorId);
     setCheckingCoupon(false);
     if ("error" in result) {
       setCouponDiscount(null);
@@ -79,9 +88,10 @@ export default function CheckoutPage({
     window.location.href = result.redirectUrl;
   }
 
-  const total = couponDiscount
+  const discountedSubtotal = couponDiscount
     ? Math.round(subtotal * (1 - couponDiscount / 100) * 100) / 100
     : subtotal;
+  const total = Math.round((discountedSubtotal + deliveryFee) * 100) / 100;
 
   return (
     <div className="mx-auto max-w-lg px-4 py-10">
@@ -168,11 +178,17 @@ export default function CheckoutPage({
         </fieldset>
 
         <div className="flex flex-col gap-1 border-t border-zinc-200 pt-4 dark:border-zinc-800">
-          {couponDiscount !== null && (
+          <div className="flex items-center justify-between text-sm text-zinc-500 dark:text-zinc-400">
+            <span>{t("subtotalLabel")}</span>
+            <span>
+              {subtotal.toFixed(2)} {tc("currency")}
+            </span>
+          </div>
+          {deliveryFee > 0 && (
             <div className="flex items-center justify-between text-sm text-zinc-500 dark:text-zinc-400">
-              <span>{t("subtotalLabel")}</span>
+              <span>{t("deliveryFeeLabel")}</span>
               <span>
-                {subtotal.toFixed(2)} {tc("currency")}
+                {deliveryFee.toFixed(2)} {tc("currency")}
               </span>
             </div>
           )}

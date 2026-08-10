@@ -1,4 +1,5 @@
 import { notFound } from "next/navigation";
+import type { Metadata } from "next";
 import { getTranslations, getLocale } from "next-intl/server";
 import {
   getApprovedVendorById,
@@ -6,9 +7,28 @@ import {
 } from "@/lib/data/vendors";
 import { getReviewsForVendor, getRatingSummary } from "@/lib/data/reviews";
 import { getCurrentProfile } from "@/lib/auth/session";
+import { isVendorFavorited } from "@/lib/data/favorites";
 import { ProductCard } from "@/components/product-card";
 import { StarRating } from "@/components/star-rating";
 import { ReviewForm } from "@/components/review-form";
+import { FavoriteButton } from "@/components/favorite-button";
+import { StartGroupOrderButton } from "@/components/group-orders/start-button";
+
+export async function generateMetadata({
+  params,
+}: {
+  params: Promise<{ id: string }>;
+}): Promise<Metadata> {
+  const { id } = await params;
+  const vendor = await getApprovedVendorById(id);
+  if (!vendor) return {};
+  return {
+    title: vendor.name,
+    description:
+      vendor.description ?? `${vendor.name} — order online, delivered in Dubai.`,
+    openGraph: vendor.logo_url ? { images: [vendor.logo_url] } : undefined,
+  };
+}
 
 export default async function VendorStorefrontPage({
   params,
@@ -19,7 +39,7 @@ export default async function VendorStorefrontPage({
   const vendor = await getApprovedVendorById(id);
   if (!vendor) notFound();
 
-  const [products, t, locale, reviews, rating, profile] = await Promise.all([
+  const [productsRaw, t, locale, reviews, rating, profile] = await Promise.all([
     getAvailableProductsForVendor(id),
     getTranslations("vendorPublic"),
     getLocale(),
@@ -27,10 +47,23 @@ export default async function VendorStorefrontPage({
     getRatingSummary(id),
     getCurrentProfile(),
   ]);
+  const isFavorited = profile ? await isVendorFavorited(profile.id, vendor.id) : false;
+  // Best sellers surface first so they're the first thing customers see.
+  const products = [...productsRaw].sort(
+    (a, b) => Number(b.is_best_seller) - Number(a.is_best_seller),
+  );
 
   return (
     <div className="mx-auto max-w-6xl px-4 py-10">
-      <div className="mb-8 flex items-center gap-4">
+      {vendor.banner_url && (
+        // eslint-disable-next-line @next/next/no-img-element
+        <img
+          src={vendor.banner_url}
+          alt=""
+          className="mb-6 h-40 w-full rounded-xl object-cover sm:h-56"
+        />
+      )}
+      <div className="mb-8 flex items-start gap-4">
         {vendor.logo_url ? (
           // eslint-disable-next-line @next/next/no-img-element
           <img
@@ -43,10 +76,23 @@ export default async function VendorStorefrontPage({
             {vendor.name.charAt(0)}
           </div>
         )}
-        <div>
-          <h1 className="text-2xl font-semibold text-zinc-900 dark:text-zinc-50">
-            {vendor.name}
-          </h1>
+        <div className="flex-1">
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <h1 className="text-2xl font-semibold text-zinc-900 dark:text-zinc-50">
+              {vendor.name}
+            </h1>
+            <div className="flex items-center gap-2">
+              {profile?.role === "customer" && (
+                <StartGroupOrderButton vendorId={vendor.id} />
+              )}
+              <FavoriteButton
+                vendorId={vendor.id}
+                initialFavorited={isFavorited}
+                locale={locale}
+                isLoggedIn={!!profile}
+              />
+            </div>
+          </div>
           {vendor.address && (
             <p className="text-sm text-zinc-500 dark:text-zinc-400">
               {vendor.address}
