@@ -50,25 +50,27 @@ available on your plan, the practical mitigation is manual, scripted exports
 
 ## 3. Manual backup (works on any plan, including Free)
 
-Until paid-tier automatic backups are confirmed running, take periodic
-manual dumps using the Postgres connection string from **Project Settings →
-Database → Connection string**:
+The Supabase CLI's own `db dump` command requires Docker Desktop to be
+installed locally, which is unnecessary overhead just to take a backup. Use
+`scripts/backup-database.mjs` instead — it connects with the same
+service-role client the app already uses and exports every table's data to
+one JSON file, no Docker required:
 
 ```bash
-pg_dump "postgresql://postgres:[YOUR-PASSWORD]@[YOUR-PROJECT-REF].supabase.co:5432/postgres" \
-  --no-owner --no-privileges -F c -f backup-$(date +%Y%m%d).dump
+node scripts/backup-database.mjs
 ```
 
-Restore a manual dump with:
+This writes `backups/backup-<date>.json`. That folder is gitignored — copy
+the file somewhere outside the project (a cloud drive, USB stick) for
+safekeeping; a backup that lives only next to the thing it's backing up
+doesn't protect against an account-level incident.
 
-```bash
-pg_restore --no-owner --no-privileges -d "postgresql://postgres:[YOUR-PASSWORD]@[YOUR-PROJECT-REF].supabase.co:5432/postgres" backup-YYYYMMDD.dump
-```
-
-Store dumps somewhere outside Supabase itself (a private cloud bucket, or
-even just a password-protected local folder) — a backup that lives next to
-the thing it's backing up doesn't protect against an account-level
-incident.
+To restore from one of these JSON files, write a small script that reads
+the file and re-inserts each table's rows via the same service-role
+client (`supabase.from(table).insert(rows)`), table by table. This is a
+data-only restore — it assumes the schema (tables/columns) already exists,
+so run any newer `supabase/migrations/*.sql` files first if restoring into
+a fresh project.
 
 ## 4. What to check periodically
 
