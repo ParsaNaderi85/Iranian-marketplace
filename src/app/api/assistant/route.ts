@@ -3,6 +3,10 @@ import Anthropic from "@anthropic-ai/sdk";
 import { z } from "zod";
 import { searchMarketplaceForAssistant } from "@/lib/data/assistant";
 import { routing, type Locale } from "@/i18n/routing";
+import { checkRateLimit, getRequestIp } from "@/lib/rate-limit";
+
+const ASSISTANT_RATE_LIMIT = 15;
+const ASSISTANT_RATE_WINDOW_MS = 60_000;
 
 const requestSchema = z.object({
   message: z.string().min(1).max(1000),
@@ -29,6 +33,19 @@ const VENDOR_TYPES = [
 ] as const;
 
 export async function POST(request: Request) {
+  const ip = getRequestIp(request);
+  const rateLimit = checkRateLimit(
+    `assistant:${ip}`,
+    ASSISTANT_RATE_LIMIT,
+    ASSISTANT_RATE_WINDOW_MS,
+  );
+  if (!rateLimit.allowed) {
+    return NextResponse.json(
+      { error: "rate_limited" },
+      { status: 429, headers: { "Retry-After": String(rateLimit.retryAfterSeconds) } },
+    );
+  }
+
   const body = await request.json().catch(() => null);
   const parsed = requestSchema.safeParse(body);
   if (!parsed.success) {

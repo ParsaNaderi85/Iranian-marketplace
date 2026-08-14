@@ -5,6 +5,10 @@ import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
 import { getCurrentProfile } from "@/lib/auth/session";
 import { VENDOR_TYPES, type VendorApplicationStatus } from "@/lib/types";
+import { checkRateLimit, getServerActionIp } from "@/lib/rate-limit";
+
+const APPLICATION_RATE_LIMIT = 3;
+const APPLICATION_RATE_WINDOW_MS = 10 * 60_000;
 
 export type ActionState = { error?: string; success?: boolean } | undefined;
 
@@ -22,6 +26,14 @@ export async function submitVendorApplication(
   _prevState: ActionState,
   formData: FormData,
 ): Promise<ActionState> {
+  const ip = await getServerActionIp();
+  const rateLimit = checkRateLimit(
+    `vendor-application:${ip}`,
+    APPLICATION_RATE_LIMIT,
+    APPLICATION_RATE_WINDOW_MS,
+  );
+  if (!rateLimit.allowed) return { error: "rateLimited" };
+
   const parsed = applicationSchema.safeParse({
     businessName: formData.get("businessName"),
     businessType: formData.get("businessType"),

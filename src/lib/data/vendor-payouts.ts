@@ -1,5 +1,6 @@
 import { createClient } from "@/lib/supabase/server";
 import type { VendorPayout } from "@/lib/types";
+import { calculateVendorPayout } from "@/lib/checkout/pricing";
 
 export type PayoutSummary = {
   vendorId: string;
@@ -24,7 +25,7 @@ export async function getVendorPayoutSummary(
 ): Promise<{ owedAed: number; unpaidOrderCount: number }> {
   const orders = await getUnpaidDeliveredOrders(vendorId);
   const owedAed = orders.reduce(
-    (sum, o) => sum + (o.subtotal_aed - o.commission_amount_aed),
+    (sum, o) => sum + calculateVendorPayout(o.subtotal_aed, o.commission_amount_aed),
     0,
   );
   return { owedAed, unpaidOrderCount: orders.length };
@@ -61,7 +62,7 @@ export async function getAllPayoutSummaries(): Promise<PayoutSummary[]> {
   for (const row of (orders as Row[]) ?? []) {
     const vendor = Array.isArray(row.vendors) ? row.vendors[0] : row.vendors;
     const existing = grouped.get(row.vendor_id);
-    const net = row.subtotal_aed - row.commission_amount_aed;
+    const net = calculateVendorPayout(row.subtotal_aed, row.commission_amount_aed);
     if (existing) {
       existing.owedAed += net;
       existing.unpaidOrderCount++;

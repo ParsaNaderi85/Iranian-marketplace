@@ -56,7 +56,8 @@
     "loginCta": "Log in",
     "signupCta": "Create account",
     "invalidCredentials": "Invalid email or password.",
-    "emailInUse": "An account with this email already exists."
+    "emailInUse": "An account with this email already exists.",
+    "tooManyAttempts": "Too many login attempts. Please wait a few minutes and try again."
   },
   "home": {
     "heroEyebrow": "Dubai's Iranian marketplace",

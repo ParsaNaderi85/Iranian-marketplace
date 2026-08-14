@@ -12,6 +12,12 @@ import {
   grantReferralRewardIfEligible,
 } from "@/lib/referral/actions";
 import { validateVendorCoupon } from "@/lib/vendor/coupon-actions";
+import {
+  calculateSubtotal,
+  calculateCommission,
+  calculateDiscountedSubtotal,
+  calculateOrderTotal,
+} from "@/lib/checkout/pricing";
 
 export async function previewAnyCoupon(
   code: string,
@@ -129,12 +135,9 @@ export async function placeOrder(
     };
   });
 
-  const subtotal = orderItems.reduce(
-    (sum, item) => sum + item.price_snapshot_aed * item.quantity,
-    0,
-  );
+  const subtotal = calculateSubtotal(orderItems);
   const commissionRate = vendor.commission_rate as number;
-  const commissionAmount = Math.round(subtotal * (commissionRate / 100) * 100) / 100;
+  const commissionAmount = calculateCommission(subtotal, commissionRate);
   const deliveryFee = (vendor.delivery_fee_aed as number) ?? 0;
 
   const referralCoupon = couponCode
@@ -146,10 +149,8 @@ export async function placeOrder(
       : null;
   const discountPercent =
     referralCoupon?.discountPercent ?? vendorCoupon?.discountPercent ?? null;
-  const discountedSubtotal = discountPercent
-    ? Math.round(subtotal * (1 - discountPercent / 100) * 100) / 100
-    : subtotal;
-  const total = Math.round((discountedSubtotal + deliveryFee) * 100) / 100;
+  const discountedSubtotal = calculateDiscountedSubtotal(subtotal, discountPercent);
+  const total = calculateOrderTotal(discountedSubtotal, deliveryFee);
 
   const deliveryGeo = await geocodeAddress(`${addressLine1}, ${area}, Dubai, UAE`);
 

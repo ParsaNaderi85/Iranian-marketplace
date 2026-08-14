@@ -47,7 +47,9 @@ export function LoginForm({ locale }: { locale: string }) {
         <p className="text-sm text-red-600">
           {state.error === "invalidCredentials"
             ? t("invalidCredentials")
-            : tc("error")}
+            : state.error === "tooManyAttempts"
+              ? t("tooManyAttempts")
+              : tc("error")}
         </p>
       )}
 

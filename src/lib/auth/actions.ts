@@ -5,6 +5,7 @@ import { z } from "zod";
 import { createClient } from "@/lib/supabase/server";
 import { applyReferralCodeIfPresent } from "@/lib/referral/actions";
 import type { UserRole } from "@/lib/types";
+import { checkRateLimit, getServerActionIp } from "@/lib/rate-limit";
 
 const loginSchema = z.object({
   email: z.string().email(),
@@ -13,6 +14,9 @@ const loginSchema = z.object({
 });
 
 export type AuthFormState = { error?: string } | undefined;
+
+const LOGIN_RATE_LIMIT = 5;
+const LOGIN_RATE_WINDOW_MS = 5 * 60_000;
 
 export async function login(
   _prevState: AuthFormState,
@@ -25,6 +29,16 @@ export async function login(
   });
   if (!parsed.success) {
     return { error: "invalid" };
+  }
+
+  const ip = await getServerActionIp();
+  const rateLimit = checkRateLimit(
+    `login:${ip}:${parsed.data.email.toLowerCase()}`,
+    LOGIN_RATE_LIMIT,
+    LOGIN_RATE_WINDOW_MS,
+  );
+  if (!rateLimit.allowed) {
+    return { error: "tooManyAttempts" };
   }
 
   const supabase = await createClient();

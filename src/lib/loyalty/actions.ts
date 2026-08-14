@@ -4,9 +4,9 @@ import { revalidatePath } from "next/cache";
 import { createClient, createServiceRoleClient } from "@/lib/supabase/server";
 import { getCurrentUser } from "@/lib/auth/session";
 import {
-  POINTS_PER_AED,
   REDEMPTION_COST,
   REDEMPTION_DISCOUNT_PERCENT,
+  calculateLoyaltyPointsEarned,
 } from "@/lib/loyalty/constants";
 
 function randomCode(length = 6) {
@@ -24,7 +24,7 @@ export async function awardLoyaltyPoints(
   totalAed: number,
 ): Promise<void> {
   const service = await createServiceRoleClient();
-  const points = Math.floor(totalAed * POINTS_PER_AED);
+  const points = calculateLoyaltyPointsEarned(totalAed);
   if (points <= 0) return;
 
   const { data: profile } = await service
